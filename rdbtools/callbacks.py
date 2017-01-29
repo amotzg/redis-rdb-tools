@@ -9,11 +9,14 @@ from .compat import isinteger
 if sys.version_info < (3,):
     import codecs
     def u(x): return codecs.unicode_escape_decode(x)[0]
+    def u2s(unistr): return str(unistr)
 else:
     def u(x): return x
+    def u2s(bytestr): return bytestr.decode('utf-8')
 
 ESCAPE = re.compile(u(r'[\x00-\x1f\\"\b\f\n\r\t\u2028\u2029]'))
 ESCAPE_ASCII = re.compile(br'([\\"]|[^\ -~])')
+ESCAPE_ASCII_S = re.compile(r'([\\"]|[^\ -~])')
 
 HAS_UTF8 = re.compile(r'[\x80-\xff]')
 ESCAPE_DCT = {
@@ -53,28 +56,35 @@ def _encode_basestring_ascii(s):
     """Return an ASCII-only JSON representation of a Python string
 
     """
-    try :
-        if isinstance(s, str) and HAS_UTF8.search(s) is not None:
-            s = s.decode('utf-8')
-    except:
+    try:
+        s = s.decode('utf-8')
+    except UnicodeDecodeError:
         pass
 
     def replace(match):
         s = match.group(0)
+        if isinstance(s, type(b'')):
+            ch_frmt = b'\\u%04x'
+        else:
+            ch_frmt = '\\u%04x'
         try:
             return ESCAPE_DCT[s]
         except KeyError:
             n = ord(s)
             if n < 0x10000:
-                #return '\\u{0:04x}'.format(n)
-                return '\\u%04x' % (n,)
+                return ch_frmt % (n,)
             else:
                 # surrogate pair
                 n -= 0x10000
                 s1 = 0xd800 | ((n >> 10) & 0x3ff)
                 s2 = 0xdc00 | (n & 0x3ff)
-                return '\\u%04x\\u%04x' % (s1, s2)
-    return '"' + str(ESCAPE_ASCII.sub(replace, s)) + '"'
+                return (ch_frmt + ch_frmt) % (s1, s2)
+    if isinstance(s, type(b'')):
+        escaped = ESCAPE_ASCII.sub(replace, s)
+        escaped = u2s(escaped)
+    else:
+        escaped = ESCAPE_ASCII_S.sub(replace, s)
+    return '"' + escaped + '"'
 
 def _encode(s, quote_numbers = True):
     if quote_numbers:
